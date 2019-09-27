@@ -1,5 +1,4 @@
 // shell内置命令的接口头文件
-// 
 #ifndef BUILTIN_H
 #define BUILTIN_H
 #include <stdbool.h>

@@ -25,7 +25,7 @@ void myEcho(char **argv) {
     // 遍历参数，用空格分割
     for (int i = 1; argv[i]; ++i) {
         if (i != 1)
-            printf(" ");
+            dprintf(STDOUT_FILENO, " ");
         dprintf(STDOUT_FILENO, "%s", argv[i]);
     }
     // 打印换行符
@@ -96,7 +96,9 @@ void myCd(char **argv) {
         if (err == -1 || cherr == -1)
             fprintf(stderr, "Invalid Path\n");
     }
-
+    else {
+        dprintf(STDOUT_FILENO, "%s\n", getenv("PWD"));
+    }
 }
 
 // 将停止的任务放在后台运行
@@ -128,6 +130,7 @@ void myBg(char **argv) {
 
     // 更新任务信息
     j ->notified = false;
+    j-> background = true;
     for (process *p = j -> first; p; p = p -> next)
         p -> stopped = false;
     // 发送继续的信号
@@ -140,12 +143,15 @@ void myBg(char **argv) {
 void myFg(char **argv) {
     job *j;
     pid_t job_id;
+    // 找到相应的停止的任务
     if (!argv[1])  {
         j = findStoppedJob(-1);
     } else {
+        // 将参数转换为数字
         char *invalid = NULL;
         job_id = strtol(argv[1], &invalid, 8);
 
+        // 参数不是数字，返回
         if (*invalid != '\0') {
             fprintf(stderr, "Invalid job specifier\n");
             return ;
@@ -154,16 +160,18 @@ void myFg(char **argv) {
         j = findStoppedJob(job_id);
     }
 
+    // 未找到停止的任务
     if (j == NULL) {
         fprintf(stderr, "No stopped job\n");
         return ;
     }
 
-
-    putJobFront(j, true);
+    // 更新任务信息并放置到前台
+    j-> background = false;
     j -> notified = false;
     for (process *p = j -> first; p; p = p -> next)
-        p -> stopped = true;
+        p -> stopped = false;
+    putJobFront(j, true);
     return ;
 }
 
@@ -187,7 +195,7 @@ void myTime(char **argv) {
     // 将其格式化为当前时间的年月日
     tm_now = localtime(&nowt);
  
-    printf("now datetime: %d-%d-%d %d:%d:%d\n", tm_now->tm_year + 1900, tm_now->tm_mon + 1, tm_now->tm_mday, tm_now->tm_hour, tm_now->tm_min, tm_now->tm_sec); 
+    printf("now datetime: %04d-%02d-%02d %02d:%02d:%02d\n", tm_now->tm_year + 1900, tm_now->tm_mon + 1, tm_now->tm_mday, tm_now->tm_hour, tm_now->tm_min, tm_now->tm_sec); 
 }
 
 // 清屏，并将光标移动至左上角

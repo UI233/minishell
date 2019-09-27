@@ -45,7 +45,7 @@ args lex(const char* cmd) {
         memcpy(res.argv[res.args_num], last, len - 1);
         res.argv[res.args_num][len - 1] = 0;
 
-        // 解析变量，将变量替换成真实的字符串
+        // 解析变量，将变量替换成相应值的字符串
         if (res.argv[res.args_num][0] == '$') {
             // 如果为数字，则解析命令行参数
             if (isNum(&res.argv[res.args_num][1])) {
@@ -53,37 +53,44 @@ args lex(const char* cmd) {
                 extern char** _argv;
                 extern int shiftv;
                 char* invalid;
+                // 将数字装换为int
                 int num = strtol(&res.argv[res.args_num][1], &invalid, 10);
+                // 非$0的命令行参数
                 if (num > 0 && num + shiftv <  _argc) {
                     free(res.argv[res.args_num]);
                     res.argv[res.args_num] = malloc(sizeof(char) * strlen(_argv[num + shiftv]));
                     strcpy(res.argv[res.args_num], _argv[num + shiftv]);
                 }
-                else if(num == 0) {
+                else if(num == 0) { // 当前运行的文件
                     free(res.argv[res.args_num]);
                     res.argv[res.args_num] = malloc(sizeof(char) * strlen(_argv[0]));
                     strcpy(res.argv[res.args_num], _argv[0]);
                 }
-                else {
+                else { // 非法参数，传入空指针
                     free(res.argv[res.args_num]);
                     res.argv[res.args_num] = malloc(sizeof(char));
                     res.argv[res.args_num][0] = '\0';
                 }
             }
-            else {
+            else { // 解析为环境变量
                 char* envarg = getenv(&res.argv[res.args_num][1]);
                 free(res.argv[res.args_num]);
-                res.argv[res.args_num] = malloc(strlen(envarg) + 1);
+                if (envarg == NULL)
+                    res.argv[res.args_num] = malloc(sizeof(char));
+                else res.argv[res.args_num] = malloc(strlen(envarg) + 1);
                 char* arg = res.argv[res.args_num];
+                // 环境变量是否存在
                 if (envarg != NULL)
-                    strcpy(arg, envarg);
-                else arg[0] = '\0';
+                    strcpy(arg, envarg); // 存在，复制进去
+                else arg[0] = '\0'; // 不存在将其设置为空字符串
             }
         } 
 
+        // 判断下一个空格的位置
         while((*cmd == ' ' || *cmd == '\t') && *cmd && *cmd != '\n') 
             ++cmd;
         last = cmd;
+        // 参数数量累加
         ++res.args_num;
         // 超过最大参数数量则退出
         if (res.args_num >= MAXARGS)
@@ -106,7 +113,7 @@ command parseSingle(args arg_group, int st, int *end) {
         error_token = arg_group.argv[st];
         return res;
     }
-
+    // 将用空格分隔开的参数，转换为一个个由管道符分割的命令
     while (*end < arg_group.args_num && !eq(arg_group.argv[*end], "|")) {
         char* arg = arg_group.argv[*end];
         if (eq(arg, ">>")) {
@@ -150,9 +157,9 @@ command parseSingle(args arg_group, int st, int *end) {
         ++*end;
     }
 
-    // 根据第一个参数, 确定指令类型，
     char* cmd = arg_group.argv[st];
     res.cmd = OUTTER; // 先设置为外部指令，这样如果没有找到匹配项则可以识别为外部指令
+    // 根据第一个参数, 确定指令类型，
     if (eq(cmd, "echo"))
         res.cmd = IECHO;
     if (eq(cmd, "help"))
@@ -264,7 +271,8 @@ job* constructJob(commandGroup cmdg) {
         if (cmdg.cmds[i].output == NULL) // 标准输出
             (*now)->outfile = STDOUT_FILENO;
         else  {
-            int oflag = O_WRONLY | O_CREAT | (cmdg.cmds[i].omod == APPEND ? O_APPEND : 0);
+            // 重定向输出, 打开文件
+            int oflag = O_WRONLY | O_CREAT | (cmdg.cmds[i].omod == APPEND ? O_APPEND : O_TRUNC);
             (*now)->outfile = open(cmdg.cmds[i].output, oflag, 0777); // 打开重定向输出文件
         }
         now = &((*now)->next);
@@ -295,10 +303,8 @@ bool interprete(const char* cmd) {
     bool should_run = true;
     jobs->background = cmdg.background;
     strcpy(jobs->cmd, cmd);
-    // 将解析出来的工作链表当中，并将已经结束的指令从链表中删除
-    addJob(jobs);
     // 解析完毕后运行命令
-    runJobs(jobs);
+    should_run = runJobs(jobs);
     // 完成后释放内存
     freeArgs(&arg_group);
     return should_run;

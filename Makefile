@@ -1,13 +1,13 @@
-OBJ=builtin.o command.o interpreter.o main.o
+OBJ=builtin.o command.o interpreter.o myshell.o
 HEADERS=include/builtin.h include/command.h include/interpreter.h
 PROJECT=myshell
 CC=gcc
 
-myshell: $(OBJ) main.c $(HEADERS)
+myshell: $(OBJ) $(HEADERS)
 	$(CC) -o $(PROJECT) $(OBJ)
 
-main.o: main.c $(HEADERS)
-	gcc -c main.c
+myshell.o: myshell.c myshell.h $(HEADERS)
+	gcc -c myshell.c
 builtin.o: src/builtin.c $(HEADERS)
 	gcc -c src/builtin.c
 interpreter.o: src/interpreter.c $(HEADERS)

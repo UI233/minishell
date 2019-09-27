@@ -12,6 +12,7 @@
 int cnt = 0;
 int now = 0;
 job *first_job = NULL;
+// 外部全局变量，myshell进程相关
 extern pid_t shell_pgid;
 extern struct termios shell_tmodes;
 extern bool shell_is_interactive;
@@ -20,9 +21,11 @@ extern bool shell_is_interactive;
 void freeProcessGroup(process *p) {
     if(p ==NULL)
         return ;
+    // 释放所有参数
     for (int i = 0; p->argv[i]; ++i)
         free(p->argv[i]);
     free(p->argv);
+    // 递归地释放链表内存
     freeProcessGroup(p->next);
     free(p->next);
 }
@@ -39,15 +42,16 @@ void updateAll() {
         bool completed = true;
         for(process *p = now->first; p; p = p->next) {
             int status;
+            // 更新线程状态
             waitpid(p->pid, &status, WNOHANG);
-            if (WIFSTOPPED(status))
+            if (WIFSTOPPED(status)) // 判断是否停止
                 p->stopped = true;
-            else if(kill(p->pid, 0) == -1){
+            else if(kill(p->pid, 0) == -1) // 判断是否退出
                 p->completed = true;
-            }
             completed &= p->completed;
         }
 
+        // 后台运行的进程退出会打印任务信息
         if(completed && now->background && !now->notified) {
             printJobInfo(stderr, "Done", now);
             now->notified = true;
@@ -60,6 +64,7 @@ bool isCompleted(job *jobs) {
     bool completed = false;
     if (jobs==NULL)
         return false;
+    // 判断属于该任务的所有进程是否完成
     for (process *p = jobs->first; p; p = p->next)
         if (p->completed)
             completed = true;
@@ -76,6 +81,7 @@ bool isStopped(job *jobs) {
     bool stopped = false;
     if (jobs==NULL)
         return false;
+    // 判断停止状态
     for (process *p = jobs->first; p && !stopped; p = p->next)
         if (p->stopped)
             stopped = true;
@@ -90,12 +96,16 @@ bool isStopped(job *jobs) {
     return stopped;
 }
 
+// 将任务放到链表表尾
 void addJob(job *jobs) {
+    // 更新所有线程状态
     updateAll();
     job* before = NULL;
     job* next;
+    // 将已退出的任务从链表删除
     for(job *p = first_job; p; p = next) {
         next = p->next;
+        // 线程已退出，释放内存
         if (isCompleted(p)) {
             --cnt;
             if (before) {
@@ -112,19 +122,23 @@ void addJob(job *jobs) {
         else
             before = p;
     }
+
     if (jobs == NULL)
         return;
     if (cnt == 0)
         now = 0;
+    // 更新id
     ++cnt;
     jobs->id = ++now;
     job **current;
+    // 寻找表尾
     for (current = &first_job; *current; current = &(*current)->next);
     *current = jobs; 
 
     return ;    
 }
 
+// 打印线程信息
 void printJobInfo(FILE* stream, const char* msg, job *j) {
     if (stream == NULL || j == NULL)
         return;
@@ -143,6 +157,7 @@ bool lauchProcess(process p, pid_t pgid, int infile, int outfile, bool backgroun
         setpgid(pid, pgid);
         if (!background) // 如果为前台运行则接管权限
             tcsetpgrp(STDIN_FILENO, pgid);
+        // 将信号设置为默认
         signal (SIGINT, SIG_DFL);
         signal (SIGQUIT, SIG_DFL);
         signal (SIGTSTP, SIG_DFL);
@@ -176,6 +191,7 @@ bool lauchProcess(process p, pid_t pgid, int infile, int outfile, bool backgroun
         }
     }
 
+    // 根据命令类型调用相关函数
     switch (p.cmdt)
     {
     // 执行外部指令
@@ -243,7 +259,7 @@ bool lauchProcess(process p, pid_t pgid, int infile, int outfile, bool backgroun
     default:
         break;
     }
-    exit(0);
+    exit(1);
 }
 
 // 把指定的线程状态标记为status
@@ -256,6 +272,7 @@ bool markStatus(job *jobs, pid_t pid, int status) {
                     // 如果为停止
                     if (WIFSTOPPED(status)) {
                         p->stopped = true;
+                        // 发现停止进程，进行标记
                         if (!j->notified) {
                             printJobInfo(stderr, "Stopped", j);
                             j->notified = true;
@@ -263,7 +280,6 @@ bool markStatus(job *jobs, pid_t pid, int status) {
                     }
                     else {
                         p->completed = true;
-                        --cnt;
                     }
 
                     return 0;
@@ -293,22 +309,25 @@ void putJobFront(job *jobs, int continued) {
         tcsetattr (STDIN_FILENO, TCSADRAIN, &jobs->tmode);
         kill(-jobs->pgid, SIGCONT);
     }
+    // 等待前台进程完成
     waitForJobs(jobs);
+    // 恢复状态，给前台控制
     tcsetpgrp(STDIN_FILENO, shell_pgid);
-    // 恢复状态
     tcgetattr (STDIN_FILENO, &jobs->tmode);
     tcsetattr (STDIN_FILENO, TCSADRAIN, &shell_tmodes);
 }
 
 // 执行一行命令
 bool runJobs(job *jobs) {
+    // 将解析出来的工作链表当中，并将已经结束的指令从链表中删除
+    addJob(jobs);
     int infile, outfile;
     int mypipe[2];
 
     infile = jobs->stdin;
     for(process *p = jobs->first; p; p = p->next) {
-        // 需要管道操作
         if (p -> next) {
+            // 需要管道操作
             pipe(mypipe);
             outfile = mypipe[1];
         }
@@ -318,43 +337,44 @@ bool runJobs(job *jobs) {
                 switch (p->cmdt)
                 {
                     // 执行需要在父线程执行的内部指令
+                    // 这些命令都需要改变当前父进程的状态
                     case CD:
                         myCd(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     case FG:
                         myFg(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     case BG: 
                         myBg(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     case EXIT:
                     case QUIT:
                         myExit(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     case EXEC:
                         myExec(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     case UMASK:
                         myUmask(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     case SET:
                         mySet(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     case SHIFT:
                         myShift(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     case UNSET:
                         myUnset(p->argv);
                         jobs->first->completed = true;
-                        return 0;
+                        return true;
                     default:
                         break;
                 }
@@ -402,9 +422,11 @@ bool runJobs(job *jobs) {
         waitForJobs(jobs);
     else if (!jobs->background)
         putJobFront(jobs, 0);
+    fflush(stdout);
     return true;
 }
 
+// 寻找第一个停止的任务
 job* findStoppedJob(pid_t pgid) {
     if (pgid == -1) {
         // 找到第一个停止的工作
@@ -421,3 +443,4 @@ job* findStoppedJob(pid_t pgid) {
         return NULL;
     }
 }
+
